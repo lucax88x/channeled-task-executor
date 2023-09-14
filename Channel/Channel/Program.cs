@@ -1,25 +1,17 @@
-﻿using System.Threading.Channels;
-using Channel;
+﻿using Channel;
 
-var opts = new ExecutorOpts(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 3);
+var opts = new ChanneledTaskExecutorOpts(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 2);
 
-await ChanneledTaskExecutor.Run(opts, async () =>
-{
-    Console.WriteLine("I will take 10 seconds");
-    await Task.Delay(TimeSpan.FromSeconds(10));
-    Console.WriteLine("I took 10 seconds");
-}, async () =>
-{
-    Console.WriteLine("I will take 2 seconds");
-    await Task.Delay(TimeSpan.FromSeconds(2));
-}, async () =>
-{
-    Console.WriteLine("I will take 3 seconds");
-    await Task.Delay(TimeSpan.FromSeconds(3));
-}, async () =>
-{
-    Console.WriteLine("I will take 4 seconds");
-    await Task.Delay(TimeSpan.FromSeconds(4));
-});
+await ChanneledTaskExecutor.Run(opts, CreateTask(1, 10), CreateTask(2, 15), CreateTask(3, 5), CreateTask(4, 10));
 
 Console.WriteLine("All done");
+
+Func<Task> CreateTask(int id, int seconds)
+{
+    return async () =>
+    {
+        Console.WriteLine($"{id}: I will take {seconds} seconds");
+        await Task.Delay(TimeSpan.FromSeconds(seconds));
+        Console.WriteLine($"{id}: I took {seconds} seconds");
+    };
+}

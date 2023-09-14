@@ -1,15 +1,14 @@
 namespace Channel;
 
 using System;
-using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-public record ExecutorOpts(TimeSpan DelayBetweenJobs, TimeSpan MaxExecutionTime, int MaxParallelJobs);
+public record ChanneledTaskExecutorOpts(TimeSpan DelayBetweenJobs, TimeSpan MaxExecutionTime, int MaxParallelJobs);
 
 public static class ChanneledTaskExecutor
 {
-    public static async Task Run(ExecutorOpts opts, params Func<Task>[] jobs)
+    public static async Task Run(ChanneledTaskExecutorOpts opts, params Func<Task>[] jobs)
     {
         var channelOpts = new BoundedChannelOptions(1)
         {
@@ -25,14 +24,10 @@ public static class ChanneledTaskExecutor
         var reader = channel.Reader;
 
         var writerThread = Task.Run(EnqueueJobs);
+        var readerThreads = Enumerable.Range(0, Math.Min(jobs.Length, opts.MaxParallelJobs))
+            .Select(_ => Task.Run(ExecuteJobs));
 
-        var threads = Enumerable.Range(0, opts.MaxParallelJobs)
-            .Select(_ => Task.Run(ExecuteJobs))
-            .ToList();
-
-        threads.Add(writerThread);
-
-        await Task.WhenAll(threads);
+        await Task.WhenAll(new List<Task>(readerThreads) { writerThread });
 
         async Task EnqueueJobs()
         {
@@ -52,11 +47,9 @@ public static class ChanneledTaskExecutor
 
         async Task ExecuteJobs()
         {
-            while (await reader.WaitToReadAsync()) // TODO: Inactivity timeout ?
+            while (await reader.WaitToReadAsync())
             {
                 var jobToExecute = await reader.ReadAsync();
-
-                //TODO: Handle other errors
 
                 try
                 {
@@ -64,12 +57,12 @@ public static class ChanneledTaskExecutor
 
                     await jobToExecute()
                         .WaitAsync(opts.MaxExecutionTime);
-                    
+
                     Console.WriteLine("Executed job");
                 }
                 catch (TimeoutException)
                 {
-                    // TODO: What now ?
+                    Console.WriteLine("Timeout awaiting");
                 }
             }
         }
