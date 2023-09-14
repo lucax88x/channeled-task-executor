@@ -5,58 +5,73 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-public class ChanneledTaskExecutor
+public record ExecutorOpts(TimeSpan DelayBetweenJobs, TimeSpan MaxExecutionTime, int MaxParallelJobs);
+
+public static class ChanneledTaskExecutor
 {
-    public async Task Run(TimeSpan delay, TimeSpan timeoutExpectations, int maxParallelJobs, params Func<Task>[] jobs)
+    public static async Task Run(ExecutorOpts opts, params Func<Task>[] jobs)
     {
-        var timeoutExpiration = TimeSpan.FromMinutes(4);
-
-        var channel = Channel.CreateBounded<Func<Task>>(new BoundedChannelOptions(maxParallelJobs)
+        var channelOpts = new BoundedChannelOptions(1)
         {
-            FullMode = BoundedChannelFullMode.Wait
-        });
+            SingleWriter = true,
+            SingleReader = false,
+            FullMode = BoundedChannelFullMode.Wait,
+            AllowSynchronousContinuations = false
+        };
 
-        // timeout?
-        var taskCompletionSources = jobs
-            .Select(_ => new TaskCompletionSource())
+        var channel = Channel.CreateBounded<Func<Task>>(channelOpts);
+
+        var writer = channel.Writer;
+        var reader = channel.Reader;
+
+        var writerThread = Task.Run(EnqueueJobs);
+
+        var threads = Enumerable.Range(0, opts.MaxParallelJobs)
+            .Select(_ => Task.Run(ExecuteJobs))
             .ToList();
 
-        var queue = new Queue<Func<Task>>(jobs);
+        threads.Add(writerThread);
 
-        await using var timer = new Timer(_ =>
-            {
-                while (queue.Count > 0)
-                {
-                    var func = queue.Dequeue();
+        await Task.WhenAll(threads);
 
-                    if (channel.Writer.TryWrite(func)) Console.WriteLine($"Enqueued job at {DateTimeOffset.Now}");
-                }
-            }, null,
-            TimeSpan.Zero,
-            delay);
-
-        await foreach (var func in channel.Reader.ReadAllAsync())
+        async Task EnqueueJobs()
         {
-            Console.WriteLine($"Job started at {DateTime.Now}");
+            foreach (var job in jobs)
+            {
+                await writer.WriteAsync(job);
 
-            await func();
+                Console.WriteLine("Enqueued job");
 
-            Console.WriteLine($"Job completed at {DateTime.Now}");
+                await Task.Delay(opts.DelayBetweenJobs);
+            }
+
+            writer.Complete();
+
+            Console.WriteLine("Writer done");
         }
 
-        // Complete the channel and wait for all consumers to finish
-        channel.Writer.Complete();
+        async Task ExecuteJobs()
+        {
+            while (await reader.WaitToReadAsync()) // TODO: Inactivity timeout ?
+            {
+                var jobToExecute = await reader.ReadAsync();
 
-        // try
-        // {
-        //     response = await taskCompletionSource.Task.WaitAsync(timeoutExpiration);
-        // }
-        // catch (TimeoutException)
-        // {
-        //     Console.WriteLine("Timeout");
-        // }
+                //TODO: Handle other errors
 
-        // await taskCompletionSources.ElementAt(0).
-        // await Task.WhenAll(jobs);
+                try
+                {
+                    Console.WriteLine("Executing job");
+
+                    await jobToExecute()
+                        .WaitAsync(opts.MaxExecutionTime);
+                    
+                    Console.WriteLine("Executed job");
+                }
+                catch (TimeoutException)
+                {
+                    // TODO: What now ?
+                }
+            }
+        }
     }
 }
