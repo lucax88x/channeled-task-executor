@@ -19,18 +19,48 @@ public class ChanneledTaskExecutorTests
     }
 
     [Fact]
+    public async Task should_run_only_twice_per_time()
+    {
+        var results = await _sut.Run(
+            new ChanneledTaskExecutorOpts(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 2),
+            () => DelayTask((1, 1)),
+            () => DelayTask((2, 1)),
+            () => DelayTask((3, 1)),
+            () => DelayTask((4, 1))
+        );
+
+        results.Should().Contain(1);
+        results.Should().Contain(2);
+        results.Should().Contain(3);
+        results.Should().Contain(4);
+    }
+
+    [Fact]
+    public async Task should_run_instant_but_only_two_per_time()
+    {
+        var results = await _sut.Run(
+            new ChanneledTaskExecutorOpts(TimeSpan.FromSeconds(0), TimeSpan.FromSeconds(5), 2),
+            () => DelayTask((1, 1)),
+            () => DelayTask((2, 1)),
+            () => DelayTask((3, 1)),
+            () => DelayTask((4, 1))
+        );
+
+        results.Should().Contain(1);
+        results.Should().Contain(2);
+        results.Should().Contain(3);
+        results.Should().Contain(4);
+    }
+
+    [Fact]
     public async Task should_crash_for_timeout_and_return_only_goods()
     {
         var results = await _sut.Run(
             new ChanneledTaskExecutorOpts(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 2),
-            _sut.Wrap(
-                    new List<(int, int)>
-                    {
-                        (1, 1), (2, 2), (3, 10), (4, 4),
-                    },
-                    DelayTask
-                )
-                .ToArray()
+            () => DelayTask((1, 1)),
+            () => DelayTask((2, 2)),
+            () => DelayTask((3, 10)),
+            () => DelayTask((4, 4))
         );
 
         results.Should().Contain(1);
@@ -40,24 +70,16 @@ public class ChanneledTaskExecutorTests
     }
 
     [Fact]
-    public async Task should_run_only_twice_per_time()
+    public async Task if_a_task_crashes_the_other_are_still_returning_data()
     {
         var results = await _sut.Run(
             new ChanneledTaskExecutorOpts(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), 2),
-            _sut.Wrap(
-                    new List<(int, int)>
-                    {
-                        (1, 1), (2, 1), (3, 1), (4, 1),
-                    },
-                    DelayTask
-                )
-                .ToArray()
+            () => DelayTask((1, 1)),
+            ThrowException
         );
 
         results.Should().Contain(1);
-        results.Should().Contain(2);
-        results.Should().Contain(3);
-        results.Should().Contain(4);
+        results.Should().HaveCount(1);
     }
 
     async Task<int> DelayTask((int id, int seconds) tuples)
@@ -70,5 +92,10 @@ public class ChanneledTaskExecutorTests
         _testOutputHelper.WriteLine($"{id}: I took {seconds} seconds");
 
         return id;
+    }
+
+    Task<int> ThrowException()
+    {
+        throw new Exception("catastrophic");
     }
 }

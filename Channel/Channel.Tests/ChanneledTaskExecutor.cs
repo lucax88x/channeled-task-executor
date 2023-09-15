@@ -1,7 +1,7 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
-namespace Channel;
+namespace Channel.Tests;
 
 public record ChanneledTaskExecutorOpts(TimeSpan DelayBetweenJobs, TimeSpan MaxExecutionTime, int MaxParallelJobs);
 
@@ -36,12 +36,6 @@ public class ChanneledTaskExecutor
 
         var writer = channel.Writer;
         var reader = channel.Reader;
-
-        var writerThread = Task.Run(EnqueueJobs);
-        var readerThreads = Enumerable.Range(0, Math.Min(jobs.Length, opts.MaxParallelJobs))
-            .Select(_ => Task.Run(ExecuteJobs));
-
-        await Task.WhenAll(new List<Task>(readerThreads) { writerThread });
 
         async Task EnqueueJobs()
         {
@@ -81,13 +75,23 @@ public class ChanneledTaskExecutor
                     _logger.LogError(ex, "Timeout waiting");
                     _logger.LogDebug("Timeout awaiting");
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "General exception running task");
+                }
             }
         }
+
+        var writerThread = Task.Run(EnqueueJobs);
+        var readerThreads = Enumerable.Range(0, Math.Min(jobs.Length, opts.MaxParallelJobs))
+            .Select(_ => Task.Run(ExecuteJobs));
+
+        await Task.WhenAll(new List<Task>(readerThreads) { writerThread });
 
         responseChannel.Writer.Complete();
 
         var responses = new List<TR>();
-
+        
         await foreach (var response in responseChannel.Reader.ReadAllAsync())
         {
             responses.Add(response);

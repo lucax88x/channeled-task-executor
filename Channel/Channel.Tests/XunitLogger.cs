@@ -5,7 +5,7 @@ using Serilog.Core;
 using Serilog.Extensions.Logging;
 using Xunit.Abstractions;
 
-namespace Channel;
+namespace Channel.Tests;
 
 public static class XunitLoggerFactory
 {
@@ -14,6 +14,8 @@ public static class XunitLoggerFactory
         var logger = new LoggerConfiguration();
 
         logger = logger
+            .MinimumLevel
+            .Debug()
             .WriteTo
             .TestOutput(testOutputHelper, formatProvider: CultureInfo.InvariantCulture);
 
